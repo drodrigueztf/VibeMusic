@@ -75,6 +75,7 @@ For deployment platforms like Railway, use environment variables instead of the 
 
 ```env
 FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_STORAGE_BUCKET=your-firebase-project-id.firebasestorage.app
 FIREBASE_CLIENT_EMAIL=your-service-account-email
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
 FIREBASE_PRIVATE_KEY_ID=
@@ -112,6 +113,7 @@ JWT_EXPIRES_IN=7d
 CORS_ORIGINS=https://your-netlify-site.netlify.app
 SEED_DEFAULT_ADMIN=false
 FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_STORAGE_BUCKET=your-firebase-project-id.firebasestorage.app
 FIREBASE_CLIENT_EMAIL=your-service-account-email
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
 FIREBASE_PRIVATE_KEY_ID=

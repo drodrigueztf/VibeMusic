@@ -20,6 +20,8 @@ const getServiceAccountFromEnv = () => {
   };
 };
 
+const getStorageBucket = () => process.env.FIREBASE_STORAGE_BUCKET;
+
 const connectDB = async () => {
   try {
     if (admin.apps.length > 0) {
@@ -29,7 +31,8 @@ const connectDB = async () => {
     const serviceAccountFromEnv = getServiceAccountFromEnv();
     if (serviceAccountFromEnv) {
       admin.initializeApp({
-        credential: admin.credential.cert(serviceAccountFromEnv)
+        credential: admin.credential.cert(serviceAccountFromEnv),
+        storageBucket: getStorageBucket(),
       });
       console.log('Firebase Admin initialized from environment variables');
       return;
@@ -38,7 +41,8 @@ const connectDB = async () => {
     const serviceAccountPath = path.join(__dirname, '../../firebaseServiceAccountKey.json');
     if (fs.existsSync(serviceAccountPath)) {
       admin.initializeApp({
-        credential: admin.credential.cert(require(serviceAccountPath))
+        credential: admin.credential.cert(require(serviceAccountPath)),
+        storageBucket: getStorageBucket(),
       });
       console.log('Firebase Admin initialized from local service account file');
       return;

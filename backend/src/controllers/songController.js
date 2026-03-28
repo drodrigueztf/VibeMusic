@@ -1,13 +1,62 @@
 const path = require('path');
-const fs = require('fs');
 const { db, admin } = require('../config/db');
 
 const serializeDoc = (doc) => ({ _id: doc.id, ...doc.data() });
+
+const getBucket = () => admin.storage().bucket();
+
+const buildStoragePath = (file, folder) => {
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+  return `${folder}/${uniqueName}`;
+};
+
+const uploadBufferToStorage = async (file, folder) => {
+  const storagePath = buildStoragePath(file, folder);
+  const bucketFile = getBucket().file(storagePath);
+
+  await bucketFile.save(file.buffer, {
+    resumable: false,
+    metadata: {
+      contentType: file.mimetype,
+      cacheControl: 'public, max-age=31536000',
+    }
+  });
+
+  const [signedUrl] = await bucketFile.getSignedUrl({
+    action: 'read',
+    expires: '03-01-2500',
+  });
+
+  return {
+    storagePath,
+    url: signedUrl,
+  };
+};
+
+const deleteFromStorage = async (storagePath) => {
+  if (!storagePath) {
+    return;
+  }
+
+  try {
+    await getBucket().file(storagePath).delete({ ignoreNotFound: true });
+  } catch (error) {
+    console.error(`Failed to delete storage object ${storagePath}:`, error.message);
+  }
+};
+
+const getRemoteFileSize = async (storagePath) => {
+  const [metadata] = await getBucket().file(storagePath).getMetadata();
+  return Number(metadata.size || 0);
+};
 
 // POST /api/songs - Upload a new song
 exports.uploadSong = async (req, res) => {
   const audioFile = req.files?.audio?.[0];
   const coverFile = req.files?.cover?.[0];
+  let uploadedAudio;
+  let uploadedCover;
 
   try {
     if (!audioFile) {
@@ -17,9 +66,12 @@ exports.uploadSong = async (req, res) => {
     const { title, artist, genre, duration } = req.body;
 
     if (!title || !artist) {
-      fs.unlinkSync(audioFile.path);
-      if (coverFile && fs.existsSync(coverFile.path)) fs.unlinkSync(coverFile.path);
       return res.status(400).json({ message: 'Title and artist are required' });
+    }
+
+    uploadedAudio = await uploadBufferToStorage(audioFile, 'songs');
+    if (coverFile) {
+      uploadedCover = await uploadBufferToStorage(coverFile, 'covers');
     }
 
     const newSong = {
@@ -27,9 +79,10 @@ exports.uploadSong = async (req, res) => {
       artist,
       genre: genre || 'Other',
       duration: duration || 0,
-      filePath: audioFile.path,
-      fileName: audioFile.filename,
-      coverUrl: coverFile ? `/uploads/covers/${coverFile.filename}` : '',
+      fileName: audioFile.originalname,
+      filePath: uploadedAudio.storagePath,
+      coverUrl: uploadedCover ? uploadedCover.url : '',
+      coverPath: uploadedCover ? uploadedCover.storagePath : '',
       uploadedBy: {
         _id: req.user._id,
         username: req.user.username,
@@ -44,8 +97,8 @@ exports.uploadSong = async (req, res) => {
 
     res.status(201).json({ _id: docRef.id, ...newSong });
   } catch (error) {
-    if (audioFile && fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
-    if (coverFile && fs.existsSync(coverFile.path)) fs.unlinkSync(coverFile.path);
+    await deleteFromStorage(uploadedAudio?.storagePath);
+    await deleteFromStorage(uploadedCover?.storagePath);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
@@ -53,16 +106,13 @@ exports.uploadSong = async (req, res) => {
 // GET /api/songs - Get all songs
 exports.getSongs = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
     const offset = (page - 1) * limit;
 
     const songsRef = db().collection('songs');
     const snapshot = await songsRef.orderBy('createdAt', 'desc').offset(offset).limit(limit).get();
-    
-    // We can't efficiently count total documents in Firestore without reading all or saving a counter.
-    // For simplicity, we just return the fetched songs.
-    const allDocs = await songsRef.get(); // Note: Not optimal for large DBs. 
+    const allDocs = await songsRef.get();
     const total = allDocs.size;
 
     const songs = snapshot.docs.map(serializeDoc);
@@ -81,7 +131,7 @@ exports.getSongs = async (req, res) => {
 // GET /api/songs/popular - Get popular songs
 exports.getPopularSongs = async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit, 10) || 10;
     const snapshot = await db().collection('songs')
       .orderBy('plays', 'desc')
       .limit(limit)
@@ -96,7 +146,7 @@ exports.getPopularSongs = async (req, res) => {
 // GET /api/songs/recent - Get recently added songs
 exports.getRecentSongs = async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit, 10) || 10;
     const snapshot = await db().collection('songs')
       .orderBy('createdAt', 'desc')
       .limit(limit)
@@ -111,7 +161,7 @@ exports.getRecentSongs = async (req, res) => {
 // GET /api/songs/genre/:genre - Get songs by genre
 exports.getSongsByGenre = async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit, 10) || 20;
     const snapshot = await db().collection('songs')
       .where('genre', '==', req.params.genre)
       .limit(limit)
@@ -126,13 +176,11 @@ exports.getSongsByGenre = async (req, res) => {
 // GET /api/songs/recommendations - Get recommendations
 exports.getRecommendations = async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit, 10) || 10;
     let recommendations = [];
 
     if (req.user && req.user.favorites && req.user.favorites.length > 0) {
-      // Find genres of favorited songs. 
-      // Simplified approach: just fetch popular songs right now since Firestore "in" queries and complex filtering is tricky.
-      // E.g. where genre in [X,Y], limit N
+      // Simplified recommendation strategy for Firestore.
     }
 
     if (recommendations.length === 0) {
@@ -153,6 +201,7 @@ exports.getSong = async (req, res) => {
     if (!doc.exists) {
       return res.status(404).json({ message: 'Song not found' });
     }
+
     res.json(serializeDoc(doc));
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -168,14 +217,12 @@ exports.streamSong = async (req, res) => {
     }
 
     const song = doc.data();
-    const filePath = song.filePath;
-    
-    if (!fs.existsSync(filePath)) {
+    if (!song.filePath) {
       return res.status(404).json({ message: 'Audio file not found' });
     }
 
-    const stat = fs.statSync(filePath);
-    const fileSize = stat.size;
+    const remoteFile = getBucket().file(song.filePath);
+    const fileSize = await getRemoteFileSize(song.filePath);
     const range = req.headers.range;
 
     if (range) {
@@ -184,26 +231,23 @@ exports.streamSong = async (req, res) => {
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunkSize = end - start + 1;
 
-      const file = fs.createReadStream(filePath, { start, end });
-      const head = {
+      res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
         'Content-Type': 'audio/mpeg',
-      };
+      });
 
-      res.writeHead(206, head);
-      file.pipe(res);
+      remoteFile.createReadStream({ start, end }).pipe(res);
     } else {
-      const head = {
+      res.writeHead(200, {
         'Content-Length': fileSize,
         'Content-Type': 'audio/mpeg',
-      };
-      res.writeHead(200, head);
-      fs.createReadStream(filePath).pipe(res);
+      });
+
+      remoteFile.createReadStream().pipe(res);
     }
 
-    // Increment play count inside firestore
     db().collection('songs').doc(req.params.id).update({
       plays: admin.firestore.FieldValue.increment(1)
     }).catch(() => {});
@@ -217,7 +261,7 @@ exports.toggleLike = async (req, res) => {
   try {
     const songRef = db().collection('songs').doc(req.params.id);
     const userRef = db().collection('users').doc(req.user._id);
-    
+
     const songDoc = await songRef.get();
     if (!songDoc.exists) {
       return res.status(404).json({ message: 'Song not found' });
@@ -234,7 +278,7 @@ exports.toggleLike = async (req, res) => {
       await userRef.update({
         favorites: admin.firestore.FieldValue.arrayRemove(song._id)
       });
-      song.likes = song.likes.filter(id => id !== userId);
+      song.likes = song.likes.filter((id) => id !== userId);
     } else {
       await songRef.update({
         likes: admin.firestore.FieldValue.arrayUnion(userId)
@@ -242,7 +286,7 @@ exports.toggleLike = async (req, res) => {
       await userRef.update({
         favorites: admin.firestore.FieldValue.arrayUnion(song._id)
       });
-      if(!song.likes) song.likes = [];
+      if (!song.likes) song.likes = [];
       song.likes.push(userId);
     }
 
@@ -264,27 +308,14 @@ exports.deleteSong = async (req, res) => {
 
     const song = songDoc.data();
 
-    // Verify ownership
     if (song.uploadedBy._id !== req.user._id) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    // Delete file
-    if (fs.existsSync(song.filePath)) {
-      fs.unlinkSync(song.filePath);
-    }
-    if (song.coverUrl) {
-      const coverPath = path.join(__dirname, '../../', song.coverUrl.replace(/^\//, ''));
-      if (fs.existsSync(coverPath)) {
-        fs.unlinkSync(coverPath);
-      }
-    }
+    await deleteFromStorage(song.filePath);
+    await deleteFromStorage(song.coverPath);
 
     await songRef.delete();
-
-    // Note: Since Firestore has no cascade delete, we might want to manually remove from all users' favorites in a real app.
-    // Given no easy way to query "array contains" and update all efficiently without looping, 
-    // we'll keep it simple for now or fetch users who had it as favorite and update.
 
     res.json({ message: 'Song deleted' });
   } catch (error) {
@@ -299,7 +330,7 @@ exports.getUserSongs = async (req, res) => {
       .where('uploadedBy._id', '==', req.params.userId)
       .get();
 
-    res.json(snapshot.docs.map(serializeDoc).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)));
+    res.json(snapshot.docs.map(serializeDoc).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
