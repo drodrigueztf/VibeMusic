@@ -60,6 +60,8 @@ Create `backend/.env`:
 PORT=5000
 JWT_SECRET=change_this_to_a_secure_random_string
 JWT_EXPIRES_IN=7d
+CORS_ORIGINS=http://localhost:5173
+SEED_DEFAULT_ADMIN=false
 ```
 
 ### 3. Configure Firebase
@@ -68,6 +70,16 @@ JWT_EXPIRES_IN=7d
 2. Enable Firestore.
 3. Generate a Firebase Admin service account key.
 4. Save the key as `backend/firebaseServiceAccountKey.json`.
+
+For deployment platforms like Railway, use environment variables instead of the JSON file:
+
+```env
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CLIENT_EMAIL=your-service-account-email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
+FIREBASE_PRIVATE_KEY_ID=
+FIREBASE_CLIENT_ID=
+```
 
 ## Run locally
 
@@ -89,6 +101,24 @@ npm run dev
 
 The API runs at `http://localhost:5000`.
 The frontend runs at `http://localhost:5173`.
+
+## Railway Deployment Notes
+
+Set `backend` as the service root directory in Railway and add these variables:
+
+```env
+JWT_SECRET=change_this_to_a_secure_random_string
+JWT_EXPIRES_IN=7d
+CORS_ORIGINS=https://your-netlify-site.netlify.app
+SEED_DEFAULT_ADMIN=false
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CLIENT_EMAIL=your-service-account-email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
+FIREBASE_PRIVATE_KEY_ID=
+FIREBASE_CLIENT_ID=
+```
+
+If you want persistent local uploads in Railway, mount a volume for `backend/uploads`.
 
 ## Tech Stack
 
