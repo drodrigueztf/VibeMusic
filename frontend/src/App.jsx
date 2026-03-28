@@ -31,7 +31,9 @@ const AppRoutes = () => {
       <Route path="/register" element={user ? <Navigate to="/" replace /> : <RegisterPage />} />
       <Route path="/search" element={<Navigate to="/explore" replace />} />
       <Route element={<Layout />}>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={
+          <ProtectedRoute><HomePage /></ProtectedRoute>
+        } />
         <Route path="/explore" element={<SearchPage />} />
         <Route path="/upload" element={
           <ProtectedRoute><UploadPage /></ProtectedRoute>
