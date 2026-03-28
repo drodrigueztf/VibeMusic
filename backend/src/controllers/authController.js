@@ -120,7 +120,7 @@ exports.getMe = async (req, res) => {
     const userData = doc.data();
     delete userData.password;
 
-    // Fetch favorites explicitly (Simulating Mongoose populate)
+    // Fetch favorites explicitly from Firestore
     let populatedFavorites = [];
     if (userData.favorites && userData.favorites.length > 0) {
       const songsRef = db().collection('songs');
